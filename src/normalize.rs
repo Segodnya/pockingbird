@@ -1,7 +1,7 @@
 //! Canonicalize a string per tier: exact (trim) and normalized (case-fold +
 //! collapse whitespace + strip trailing punctuation), `exact ⊂ normalized`.
 //!
-//! Decisions (PLAN "Open details"):
+//! Decisions:
 //! - **Whitespace** is *collapsed* to a single space (runs → one space), not
 //!   removed, so word boundaries are preserved (`"o  k" → "o k"`).
 //! - **Trailing punctuation** is every Unicode Punctuation char (category `P`:

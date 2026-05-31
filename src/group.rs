@@ -73,12 +73,7 @@ pub fn group_tier(matrix: &Matrix, tier: Tier, config: &Match) -> Vec<CandidateG
         config.fuzzy_max_distance,
         config.fuzzy_min_length,
     );
-    bucket(
-        &canon,
-        tier,
-        config.empty_policy,
-        config.min_locales_agree,
-    )
+    bucket(&canon, tier, config.empty_policy, config.min_locales_agree)
 }
 
 // ---------------------------------------------------------------------------

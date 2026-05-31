@@ -2,7 +2,7 @@
 
 Domain vocabulary for `pockingbird`, a report-only CLI that finds duplicate
 translation keys across gettext `.po` catalogs. Use these terms exactly; they name
-the seams the design is built around. See [PLAN.md](./PLAN.md) for the staged plan.
+the seams the design is built around.
 
 ## Core terms
 

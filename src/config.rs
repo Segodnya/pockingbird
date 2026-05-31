@@ -1,7 +1,7 @@
 //! TOML configuration schema (`Config`/`Scan`/`Locales`/`Match`/`Normalize`/
 //! `Output`) plus defaults. Parameterizes every pipeline stage.
 //!
-//! Defaults mirror the example `pockingbird.toml` in PLAN.md exactly. Missing
+//! Defaults mirror the example `pockingbird.toml` exactly. Missing
 //! tables/fields fall back to these defaults via container-level `serde(default)`.
 
 use std::fmt;
@@ -218,7 +218,7 @@ fn subsignature_count(m: usize, t: usize) -> u128 {
 mod tests {
     use super::*;
 
-    // Mirrors the example pockingbird.toml in PLAN.md / README.md.
+    // Mirrors the example pockingbird.toml in README.md.
     const EXAMPLE: &str = r#"
 [scan]
 po_patterns = ["**/*.po"]

@@ -1,7 +1,7 @@
 //! Parse a `.po` file via polib into a catalog of keys and per-locale values.
 //! `domain` comes from the filename stem; plural forms are joined with `\u{1}`.
 //!
-//! ## gettext flag policy (PLAN "Open detail", TODO 1.6)
+//! ## gettext flag policy
 //!
 //! - **Obsolete (`#~`)** entries are skipped. polib's parser already drops them
 //!   (an `#~` line starts with `#` but matches no known comment prefix), so no
