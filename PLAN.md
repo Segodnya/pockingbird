@@ -36,8 +36,8 @@ src/
   lib.rs        // pipeline: walk -> po -> index -> group -> report
   config.rs     // TOML schema (Config/Match/Locales/Output) + defaults
   walk.rs       // discover .po files (adapted from dead-poets walk)
-  locale.rs     // derive locale id from path (.../<locale>/LC_MESSAGES/*.po)
-  po.rs         // parse a locale catalog via polib -> Catalog
+  locale.rs     // locale id from path (.../<locale>/LC_MESSAGES/*.po); path fallback
+  po.rs         // parse a .po via polib -> Catalog; domain from filename stem
   normalize.rs  // canonicalize a string per tier (trim/case/whitespace/punct)
   fuzzy.rs      // BK-tree + union-find -> per-locale fuzzy string clusters
   index.rs      // matrix KeyId -> [per locale: Cell]
@@ -52,12 +52,23 @@ pockingbird.toml      // example config
 
 ## Data model
 
-- `KeyId = { msgctxt: Option<String>, msgid: String, msgid_plural: Option<String> }`.
+- `KeyId = { domain, msgctxt: Option<String>, msgid: String, msgid_plural: Option<String> }`.
+  `domain` comes from the `.po` filename stem (`messages`, `django`, …). It makes
+  `en/messages.po:X` and `en/django.po:X` **distinct keys**, so the same
+  `msgctxt+msgid` across domains never collides in one locale column — and a pair
+  that turns out identical becomes a cross-domain candidate (see Output).
+- **Locale id (column axis).** Derived from the path `.../<locale>/LC_MESSAGES/*.po`.
+  When the layout doesn't match, **fall back to the file path / parent dir as the
+  id**. The report shows whichever id was used (locale or path).
 - Plural forms: all `msgstr[0..n]` joined into one per-locale string
   (separator `\u{1}`).
 - `Cell = Some(canonical) | Empty` — a key's value in a locale.
 - `Matrix`: `KeyId -> Vec<Cell>` over a fixed order of active locales
   `L = all_locales \ exclude`, `M = |L|`.
+- **Eligibility guard.** A key participates in grouping only if it has
+  `≥ min_locales_agree` **non-empty** cells. A key with nothing (or almost
+  nothing) translated has nothing to match on; this kills the degenerate
+  "everything empty" bucket under both `own` and `skip`.
 
 ## Core algorithm (group.rs + fuzzy.rs)
 
@@ -77,6 +88,9 @@ Cell canonicalization per tier:
   Note: edit distance is not transitive, so union-find clusters are approximate
   (a chain of ≤2 steps can drift further apart). This is documented and
   acceptable for duplicate hunting.
+  **Min-length guard:** strings shorter than `fuzzy_min_length` (default 5) skip
+  the fuzzy tier entirely (their canonical is the normalized value) — distance ≤2
+  on short strings merges genuinely different words (`Save`/`Same`, `On`/`Off`).
 
 Bucketing (identical for every tier):
 
@@ -86,27 +100,44 @@ Bucketing (identical for every tier):
    with `t` locales dropped (`C(M,t)` of them); a bucket groups keys that agree
    in the remaining `M−t` locales, with the dropped locales being where they
    diverge. `T = M − K`, where `K = min_locales_agree`.
-3. **Empty policy.** `own`: `Empty` is a distinct token in the signature.
-   `skip`: an empty locale drops out of the sub-signature (via the same
-   leave-one-out machinery) and out of the denominator. `exclude` removes locales
-   before the matrix is built.
-4. **Tier/level dedup.** Each key is attributed to its strongest tier and highest
-   match level; a partial section only shows links not already covered above.
-   Buckets of size 1 are ignored.
+3. **Empty policy (cell-level).** `own`: `Empty` is a distinct token in the
+   signature. `skip`: an empty cell drops out of the sub-signature (via the same
+   leave-one-out machinery) and out of the denominator. Dropping a whole locale is
+   a separate mechanism — `[locales].exclude`, applied before the matrix is built —
+   not an empty policy.
+4. **Level dedup (within a tier) — kept.** A full `M/M` group also satisfies its
+   own `M−1`, `M−2`, … sub-signatures (leave-one-out), so a group is shown only at
+   its **highest** agreement level; lower levels suppress any group whose agreeing
+   set is a subset of one already shown above. Buckets of size 1 are ignored.
+5. **Cross-tier dedup — dropped.** Tiers nest (`exact ⊂ normalized ⊂ fuzzy`), so an
+   exact duplicate also appears in the normalized and fuzzy sections. We **do not**
+   reconcile across tiers: each tier section is self-contained and the reader scans
+   from the strongest. This removes the edge-reconciliation logic from `group.rs`.
 
 ```
-DuplicateGroup {
+CandidateGroup {
   keys, agree_locales, total_locales,
   shared:  Map<Locale, String>,
   differ:  Map<Locale, Vec<(KeyId, String)>>,
   tier:    Exact | Normalized | Fuzzy,
+  cross_domain: bool,   // keys span >1 domain -> "unify into a shared domain"
 }
 ```
+
+The `group.rs` interface is the **canonical `Matrix`**, not a per-cell
+canonicalize function: `exact`/`normalized` are pure per-cell `Fn(&str)->String`,
+`fuzzy` is per-locale `Fn(&[String])->Map`; all three produce a canonical matrix
+that bucketing consumes, so `group.rs` stays genuinely tier-agnostic.
 
 Complexity: bucketing is `O(n · C(M,T))` hashes (17k × `C(7, 1..2)` is cheap);
 fuzzy is BK-tree queries per locale (`≈ n·log n` + neighbors), not a global
 `O(n²)`. Parallelize with rayon; results are deterministic (sorted by key), as in
 `dead-poets`.
+
+Partial matching is meant for "almost all" locales, so `T = M − K` is small by
+design. At startup we validate `Σ C(M, 0..T)` against a cap (a few hundred
+sub-signatures per key); a `min_locales_agree` too low for `M` is a **config error**
+with a clear message, not a silent combinatorial blow-up.
 
 ## Configuration (pockingbird.toml)
 
@@ -117,13 +148,15 @@ ignore_dirs = ["vendor", "node_modules", ".git"]
 roots = ["."]
 
 [locales]
-exclude = []
+exclude = []              # drop whole locales BEFORE the matrix (one column gone)
 
 [match]
 tiers = ["exact", "normalized", "fuzzy"]
 fuzzy_max_distance = 2
-empty_policy = "own"      # own | skip
-min_locales_agree = 5
+fuzzy_min_length = 5      # strings shorter than this skip the fuzzy tier
+empty_policy = "own"      # own | skip — applies to an empty CELL only
+min_locales_agree = 5     # report tiers from M/M down to this floor; validated
+                          # against M so T = M - K stays small (see Core algorithm)
 
 [match.normalize]
 case_fold = true
@@ -138,8 +171,10 @@ format = "text"           # text | json
 
 - **text** (colored): sections per tier (exact → normalized → fuzzy), each
   grouped by match level (`M/M`, `M−1/M`, …). Each group lists keys, shared
-  values, and diverging locales. A summary reports groups / keys / potentially
-  removable keys.
+  values, and diverging columns (locale id, or path when the locale couldn't be
+  derived). Cross-domain groups are flagged with a *"unify into a shared domain"*
+  hint. A summary reports groups / keys / **candidate** keys (never "removable" —
+  with no source scan the tool can't prove call-sites are interchangeable).
 - **json**: the same group structure, machine-readable.
 - Exit code: always `0` (`--fail-on-dupes` is out of MVP scope — YAGNI).
 
@@ -187,3 +222,9 @@ Synthetic `.po` files (6 locales `en/ru/es/pt/tr/id`) crafted to exercise:
 
 - Exact `normalize` rules (which punctuation characters to strip).
 - BK-tree: in-house module vs the `bk-tree` crate.
+- gettext flags: whether to skip obsolete (`#~`) and fuzzy-flagged (`#, fuzzy`)
+  entries, or feed them into the matrix. Decide before the first real-data run.
+- Source-locale empty `msgstr` (where the value is implicitly the `msgid`):
+  currently treated as `Empty`. Possible later refinement: treat as `= msgid`.
+- Short common strings (`OK`×50) are valid candidates by definition and are
+  reported as-is; no frequency/length noise filter in the MVP.
