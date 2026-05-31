@@ -2,8 +2,15 @@
 name = "pockingbird"
 version = "0.1.0"
 edition = "2021"
+authors = ["Kira Kurentsov <immortalsteel@gmail.com>"]
 description = "Report-only CLI that finds duplicate translation keys across gettext .po catalogs"
+repository = "https://github.com/Segodnya/pockingbird"
+homepage = "https://github.com/Segodnya/pockingbird"
+documentation = "https://docs.rs/pockingbird"
+readme = "README.md"
 license = "MIT"
+keywords = ["gettext", "i18n", "localization", "po", "duplicate"]
+categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = ["cli"]
@@ -31,6 +38,14 @@ colored = { version = "2", optional = true }
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
+# Auto-installs the hooks in .cargo-husky/hooks/ into .git/hooks on first build
+# of dev-deps (e.g. `cargo test`), so no manual `git config` step is needed.
+cargo-husky = { version = "1.5.0", default-features = false, features = ["user-hooks"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 [lints.rust]
 unused = "warn"
