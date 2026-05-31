@@ -1,15 +1,17 @@
 //! CLI surface (clap derive): `find <path> --config <path> --format text|json`.
 //! Behind the `cli` feature. Exit code is always `0` (the tool reports, it does
-//! not gate). `run` wires the whole pipeline: `walk → po → index → group →
-//! report`.
+//! not gate). This is the thin shell around [`crate::pipeline`]: it discovers
+//! files, renders progress to stderr, and writes the report to stdout — the
+//! pipeline run itself is the testable core.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::config::{self, Config};
-use crate::index::{build_matrix, CatalogInput};
-use crate::{group, locale, po, report, walk};
+use crate::pipeline::{self, PipelineError, PipelineEvent, ProgressSink};
+use crate::{po, report, walk};
 
 #[derive(Debug, Parser)]
 #[command(name = "pockingbird", version, about, long_about = None)]
@@ -55,7 +57,6 @@ pub fn run(cli: Cli) -> i32 {
 
 fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
     use std::io::Write;
-    use std::time::Instant;
 
     let started = Instant::now();
 
@@ -83,72 +84,76 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
     }
     eprintln!("pockingbird: found {} .po files", files.len());
 
-    let mut inputs = Vec::new();
-    let mut skipped = Vec::new();
-    let total = files.len();
-    for (index, file) in files.iter().enumerate() {
-        eprint!("\rpockingbird: parsing {}/{total}", index + 1);
-        match po::parse_po(file) {
-            Ok(catalog) => inputs.push(CatalogInput {
-                locale: locale::locale_id(file),
-                catalog,
-            }),
-            // Report-only: a malformed catalog is skipped with a warning, never
-            // fatal (architecture rule: the client decides what to do).
-            Err(error) => skipped.push(format!("  {}: {error}", file.display())),
+    let mut progress = StderrProgress::default();
+    let report = match pipeline::run(&files, po::parse_po, &config, &mut progress) {
+        Ok(report) => report,
+        Err(PipelineError::NoCatalogs) => {
+            eprintln!("no catalogs parsed");
+            return;
         }
-    }
-    eprintln!(); // close the progress line
-    if !skipped.is_empty() {
-        eprintln!("pockingbird: skipped {} file(s):", skipped.len());
-        for line in &skipped {
-            eprintln!("{line}");
+        Err(PipelineError::Config(error)) => {
+            eprintln!("config error: {error}");
+            return;
         }
-    }
-    if inputs.is_empty() {
-        eprintln!("no catalogs parsed");
-        return;
-    }
-
-    let mut matrix = build_matrix(&inputs, &config.locales.exclude);
-    let total_keys = matrix.rows.len();
-    eprintln!(
-        "pockingbird: matrix — {} locales × {total_keys} keys",
-        matrix.locales.len()
-    );
-
-    if let Err(error) = config.validate(matrix.locales.len()) {
-        eprintln!("config error: {error}");
-        return;
-    }
-
-    matrix.retain_eligible(config.match_.min_locales_agree);
-
-    let mut groups = Vec::new();
-    for &tier in &config.match_.tiers {
-        let tier_started = Instant::now();
-        eprint!("pockingbird: grouping {tier:?} …");
-        let tier_groups = group::group_tier(&matrix, tier, &config.match_);
-        eprintln!(
-            " {} groups ({:.1?})",
-            tier_groups.len(),
-            tier_started.elapsed()
-        );
-        groups.extend(tier_groups);
-    }
+    };
 
     let rendered = if wants_json(format, &config) {
-        report::to_json(&groups, total_keys)
+        report::to_json(&report.groups, report.total_keys)
     } else {
-        report::to_text(&groups, total_keys)
+        report::to_text(&report.groups, report.total_keys)
     };
     eprintln!(
         "pockingbird: {} groups total in {:.1?}",
-        groups.len(),
+        report.groups.len(),
         started.elapsed()
     );
     // Ignore a broken pipe (e.g. piping into `head`) instead of panicking.
     let _ = writeln!(std::io::stdout(), "{rendered}");
+}
+
+/// Renders pipeline progress to stderr and times each tier. The presentation
+/// (carriage-return counter, deferred skip list, per-tier elapsed) lives here,
+/// off the core.
+#[derive(Default)]
+struct StderrProgress {
+    skipped: Vec<String>,
+    tier_started: Option<Instant>,
+}
+
+impl ProgressSink for StderrProgress {
+    fn emit(&mut self, event: PipelineEvent<'_>) {
+        match event {
+            PipelineEvent::Skipped { path, error } => {
+                self.skipped.push(format!("  {}: {error}", path.display()));
+            }
+            PipelineEvent::Parsing { done, total } => {
+                eprint!("\rpockingbird: parsing {done}/{total}");
+                if done == total {
+                    eprintln!(); // close the progress line
+                    if !self.skipped.is_empty() {
+                        eprintln!("pockingbird: skipped {} file(s):", self.skipped.len());
+                        for line in &self.skipped {
+                            eprintln!("{line}");
+                        }
+                    }
+                }
+            }
+            PipelineEvent::Matrix { locales, keys } => {
+                eprintln!("pockingbird: matrix — {locales} locales × {keys} keys");
+            }
+            PipelineEvent::TierStarted(tier) => {
+                eprint!("pockingbird: grouping {tier:?} …");
+                self.tier_started = Some(Instant::now());
+            }
+            PipelineEvent::TierDone { groups, .. } => {
+                let elapsed = self.tier_started.take().map(|t| t.elapsed());
+                match elapsed {
+                    Some(elapsed) => eprintln!(" {groups} groups ({elapsed:.1?})"),
+                    None => eprintln!(" {groups} groups"),
+                }
+            }
+        }
+    }
 }
 
 fn load_config(path: Option<&Path>) -> Result<Config, String> {

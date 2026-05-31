@@ -18,6 +18,7 @@
 //!   canonical matrix → [`CandidateGroup`](group::CandidateGroup)s.
 //! - [`report`] — render the groups as text (colored) or json.
 //!
+//! [`pipeline`] is the deep core wiring these stages into a single testable run;
 //! [`config`] holds the TOML schema and defaults that parameterize every stage.
 
 pub mod config;
@@ -26,6 +27,7 @@ pub mod group;
 pub mod index;
 pub mod locale;
 pub mod normalize;
+pub mod pipeline;
 pub mod po;
 pub mod report;
 pub mod walk;

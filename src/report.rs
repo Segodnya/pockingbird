@@ -29,6 +29,9 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
+// `Tier` the type is only named by the text renderer (`cli`) and the tests; the
+// JSON path goes through `tier.label()`, which doesn't name the type.
+#[cfg(any(feature = "cli", test))]
 use crate::config::Tier;
 use crate::group::CandidateGroup;
 use crate::index::{Cell, KeyId};
@@ -87,7 +90,7 @@ pub fn to_json(groups: &[CandidateGroup], total_keys: usize) -> String {
 
 fn json_group(group: &CandidateGroup) -> JsonGroup<'_> {
     JsonGroup {
-        tier: tier_name(group.tier),
+        tier: group.tier.label(),
         agree_locales: group.agree_locales,
         total_locales: group.total_locales,
         cross_domain: group.cross_domain,
@@ -121,14 +124,6 @@ fn cell_value(cell: &Cell) -> Option<&str> {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-fn tier_name(tier: Tier) -> &'static str {
-    match tier {
-        Tier::Exact => "exact",
-        Tier::Normalized => "normalized",
-        Tier::Fuzzy => "fuzzy",
-    }
-}
-
 /// Distinct keys appearing in at least one group — the *candidate* keys (never
 /// "removable": the tool reports, the human decides).
 fn candidate_key_count(groups: &[CandidateGroup]) -> usize {
@@ -143,10 +138,6 @@ fn candidate_key_count(groups: &[CandidateGroup]) -> usize {
 // Text (5.2–5.4) — behind `cli`, needs `colored`
 // ---------------------------------------------------------------------------
 
-/// Tiers in display order; sections render in this sequence.
-#[cfg(feature = "cli")]
-const TIER_ORDER: [Tier; 3] = [Tier::Exact, Tier::Normalized, Tier::Fuzzy];
-
 /// Render groups as colored text: a section per tier (exact→normalized→fuzzy),
 /// within each ordered by match level; a footer summary. Empty cell under `own`
 /// shows as `∅`; cross-domain groups carry a unify hint.
@@ -157,7 +148,7 @@ pub fn to_text(groups: &[CandidateGroup], total_keys: usize) -> String {
     use colored::Colorize;
 
     let mut out = String::new();
-    for tier in TIER_ORDER {
+    for tier in Tier::ALL {
         let mut section: Vec<&CandidateGroup> =
             groups.iter().filter(|group| group.tier == tier).collect();
         if section.is_empty() {
@@ -170,7 +161,7 @@ pub fn to_text(groups: &[CandidateGroup], total_keys: usize) -> String {
                 .then(a.keys.cmp(&b.keys))
         });
 
-        let _ = writeln!(out, "{}", tier_name(tier).to_uppercase().bold().cyan());
+        let _ = writeln!(out, "{}", tier.label().to_uppercase().bold().cyan());
         let mut last_level = None;
         for group in section {
             let level = (group.agree_locales, group.total_locales);

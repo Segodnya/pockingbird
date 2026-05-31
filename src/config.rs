@@ -71,6 +71,23 @@ pub enum Tier {
     Fuzzy,
 }
 
+impl Tier {
+    /// Every tier in canonical order (`exact ⊂ normalized ⊂ fuzzy`). The single
+    /// source of tier ordering — both the default `tiers` and the report's
+    /// section order derive from this, so a new tier can't be silently omitted.
+    pub const ALL: [Tier; 3] = [Tier::Exact, Tier::Normalized, Tier::Fuzzy];
+
+    /// The tier's lowercase name, matching its serde representation. Used in both
+    /// the JSON `tier` field and the text section header.
+    pub fn label(self) -> &'static str {
+        match self {
+            Tier::Exact => "exact",
+            Tier::Normalized => "normalized",
+            Tier::Fuzzy => "fuzzy",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EmptyPolicy {
@@ -102,7 +119,7 @@ impl Default for Scan {
 impl Default for Match {
     fn default() -> Self {
         Self {
-            tiers: vec![Tier::Exact, Tier::Normalized, Tier::Fuzzy],
+            tiers: Tier::ALL.to_vec(),
             fuzzy_max_distance: 2,
             fuzzy_min_length: 5,
             empty_policy: EmptyPolicy::Own,

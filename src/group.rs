@@ -185,6 +185,77 @@ struct RawGroup<'a> {
     keys: BTreeSet<&'a KeyId>,
 }
 
+/// The grouping behavior of an empty policy, concentrated on the type so the
+/// bucketing code never branches on the policy itself. Lives here (not in
+/// `config`) because the projection speaks in `group.rs` terms (`SigToken`,
+/// `RawGroup`, the canonical `Matrix`).
+impl EmptyPolicy {
+    /// Project a canonical row into the `(column, token)` pairs that take part in
+    /// sub-signatures. `own` keeps every column (Empty is a token); `skip` omits
+    /// empty columns entirely.
+    fn present(self, row: &[Cell]) -> Vec<(usize, SigToken)> {
+        match self {
+            EmptyPolicy::Own => row
+                .iter()
+                .enumerate()
+                .map(|(i, cell)| (i, token(cell)))
+                .collect(),
+            EmptyPolicy::Skip => row
+                .iter()
+                .enumerate()
+                .filter_map(|(i, cell)| match cell {
+                    Cell::Value(value) => Some((i, SigToken::Value(value.clone()))),
+                    Cell::Empty => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether a retained sub-signature is a real duplicate candidate. Under
+    /// `own`, an all-empty sub-signature is not (shared emptiness isn't a match);
+    /// under `skip`, empties are already absent, so every sub-signature counts.
+    fn admits(self, subsig: &SubSig) -> bool {
+        match self {
+            EmptyPolicy::Own => subsig.iter().any(|(_, t)| !matches!(t, SigToken::Empty)),
+            EmptyPolicy::Skip => true,
+        }
+    }
+
+    /// The diverging columns and the `total_locales` denominator for a group.
+    /// Under `own` every non-retained column diverges and the denominator is the
+    /// full width. Under `skip` only columns where every member is non-empty
+    /// diverge; empties drop out of the denominator entirely.
+    fn differ_total(
+        self,
+        retained: &BTreeSet<usize>,
+        width: usize,
+        group: &RawGroup,
+        canon: &Matrix,
+    ) -> (Vec<usize>, usize) {
+        match self {
+            EmptyPolicy::Own => {
+                let differ = (0..width)
+                    .filter(|index| !retained.contains(index))
+                    .collect();
+                (differ, width)
+            }
+            EmptyPolicy::Skip => {
+                let differ: Vec<usize> = (0..width)
+                    .filter(|index| !retained.contains(index))
+                    .filter(|index| {
+                        group
+                            .keys
+                            .iter()
+                            .all(|key| !canon.rows[*key][*index].is_empty())
+                    })
+                    .collect();
+                let total = group.subsig.len() + differ.len();
+                (differ, total)
+            }
+        }
+    }
+}
+
 fn bucket(
     canon: &Matrix,
     tier: Tier,
@@ -263,21 +334,7 @@ fn bucket(
 
 /// Every valid sub-signature for one key's canonical row.
 fn subsigs(row: &[Cell], policy: EmptyPolicy, min_agree: usize) -> Vec<SubSig> {
-    let present: Vec<(usize, SigToken)> = match policy {
-        EmptyPolicy::Own => row
-            .iter()
-            .enumerate()
-            .map(|(i, cell)| (i, token(cell)))
-            .collect(),
-        EmptyPolicy::Skip => row
-            .iter()
-            .enumerate()
-            .filter_map(|(i, cell)| match cell {
-                Cell::Value(value) => Some((i, SigToken::Value(value.clone()))),
-                Cell::Empty => None,
-            })
-            .collect(),
-    };
+    let present = policy.present(row);
     let count = present.len();
     if count < min_agree {
         return Vec::new();
@@ -294,10 +351,7 @@ fn subsigs(row: &[Cell], policy: EmptyPolicy, min_agree: usize) -> Vec<SubSig> {
                 .filter(|(position, _)| !dropped.contains(position))
                 .map(|(_, pair)| pair.clone())
                 .collect();
-            // Own: a sub-signature that is entirely empty is not a duplicate.
-            if matches!(policy, EmptyPolicy::Own)
-                && retained.iter().all(|(_, t)| matches!(t, SigToken::Empty))
-            {
+            if !policy.admits(&retained) {
                 continue;
             }
             out.push(retained);
@@ -361,29 +415,7 @@ fn build_group(
         shared.insert(canon.locales[*index].clone(), cell);
     }
 
-    let (differ_cols, total): (Vec<usize>, usize) = match policy {
-        EmptyPolicy::Own => {
-            let differ = (0..width)
-                .filter(|index| !retained.contains(index))
-                .collect();
-            (differ, width)
-        }
-        EmptyPolicy::Skip => {
-            // Diverging locales = non-retained columns where every member is
-            // non-empty; empties drop out of the denominator entirely.
-            let differ: Vec<usize> = (0..width)
-                .filter(|index| !retained.contains(index))
-                .filter(|index| {
-                    group
-                        .keys
-                        .iter()
-                        .all(|key| !canon.rows[*key][*index].is_empty())
-                })
-                .collect();
-            let total = group.subsig.len() + differ.len();
-            (differ, total)
-        }
-    };
+    let (differ_cols, total) = policy.differ_total(&retained, width, &group, canon);
     let differ = differ_cols
         .into_iter()
         .map(|index| canon.locales[index].clone())
@@ -626,5 +658,84 @@ mod tests {
         assert_eq!(combinations(3, 0), vec![Vec::<usize>::new()]);
         assert_eq!(combinations(3, 2), vec![vec![0, 1], vec![0, 2], vec![1, 2]]);
         assert_eq!(combinations(2, 3).len(), 0);
+    }
+
+    // --- 4.1 fuzzy canonicalization, through the public seam ---
+
+    fn fuzzy_canon(m: &Matrix) -> Matrix {
+        // distance 2, min length 5 (the defaults).
+        canonical_matrix(m, Tier::Fuzzy, &Normalize::default(), 2, 5)
+    }
+
+    #[test]
+    fn fuzzy_clusters_per_column_without_transpose() {
+        // "delte" sits with "delta" in column 0 (distance 1) so it canonicalizes
+        // to the cluster representative "delta"; in column 1 the same "delte" is
+        // alone (its neighbour is far away) and stays "delte". One assertion thus
+        // proves clustering is column-local AND the axes aren't swapped: a swap
+        // would put "delte" in column 0 and "delta" in column 1.
+        let a = key("m", "a");
+        let b = key("m", "b");
+        let m = matrix(
+            &["c0", "c1"],
+            vec![
+                (a.clone(), vec![val("delte"), val("delte")]),
+                (b.clone(), vec![val("delta"), val("zzzzz")]),
+            ],
+        );
+        let canon = fuzzy_canon(&m);
+        assert_eq!(canon.rows[&a][0], val("delta"), "column 0 clusters");
+        assert_eq!(canon.rows[&a][1], val("delte"), "column 1 leaves it alone");
+        assert_eq!(canon.rows[&b][0], val("delta"));
+        assert_eq!(canon.rows[&b][1], val("zzzzz"));
+    }
+
+    #[test]
+    fn fuzzy_representative_is_lexicographically_smallest() {
+        // Three mutually-near values collapse onto the smallest, "gamma".
+        let a = key("m", "a");
+        let b = key("m", "b");
+        let c = key("m", "c");
+        let m = matrix(
+            &["en"],
+            vec![
+                (a.clone(), vec![val("gammc")]),
+                (b.clone(), vec![val("gammb")]),
+                (c.clone(), vec![val("gamma")]),
+            ],
+        );
+        let canon = fuzzy_canon(&m);
+        assert_eq!(canon.rows[&a][0], val("gamma"));
+        assert_eq!(canon.rows[&b][0], val("gamma"));
+        assert_eq!(canon.rows[&c][0], val("gamma"));
+    }
+
+    #[test]
+    fn fuzzy_min_length_keeps_short_strings_distinct() {
+        // "on"/"off" are under the 5-char floor: they skip fuzzy and stay apart,
+        // even though their edit distance is within range.
+        let a = key("m", "a");
+        let b = key("m", "b");
+        let m = matrix(
+            &["en"],
+            vec![(a.clone(), vec![val("on")]), (b.clone(), vec![val("off")])],
+        );
+        let canon = fuzzy_canon(&m);
+        assert_eq!(canon.rows[&a][0], val("on"));
+        assert_eq!(canon.rows[&b][0], val("off"));
+    }
+
+    #[test]
+    fn fuzzy_preserves_shape_and_empties() {
+        let a = key("m", "a");
+        let m = matrix(
+            &["en", "ru"],
+            vec![(a.clone(), vec![val("hello"), Cell::Empty])],
+        );
+        let canon = fuzzy_canon(&m);
+        assert_eq!(canon.locales, m.locales);
+        assert_eq!(canon.rows.len(), 1);
+        assert_eq!(canon.rows[&a].len(), 2);
+        assert_eq!(canon.rows[&a][1], Cell::Empty, "empties pass through");
     }
 }

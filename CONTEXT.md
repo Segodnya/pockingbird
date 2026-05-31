@@ -56,3 +56,20 @@ the seams the design is built around.
   normalized and fuzzy sections; tiers are self-contained.
 - **Cross-domain candidate** — a group whose keys span more than one domain,
   flagged with a *"unify into a shared domain"* hint.
+
+## Pipeline
+
+- **Pipeline run** — the deep core (`pipeline.rs`, no `cli` feature): given `.po`
+  paths, a parse adapter, config, and a progress sink, it parses, builds the
+  Matrix, validates, gates eligibility, groups every tier, and returns a
+  **Report**. This is the test surface — the seam the CLI shell wraps.
+- **Parse adapter** — the injected `Fn(&Path) -> Result<ParsedCatalog, PoError>`.
+  Real adapter reads the file (`po::parse_po`); the in-memory adapter feeds tests
+  without the filesystem. The seam that makes the skip-policy testable.
+- **Skip-policy** — a catalog that fails to parse is recorded in `Report.skipped`
+  and the run continues; never fatal (report-only). Lives in the pipeline run.
+- **Progress sink** — a one-method seam (`emit(PipelineEvent)`) the run pushes
+  events to. The stderr adapter renders and times; the collector adapter records
+  events for assertions. Keeps timing/IO out of the core.
+- **Report** — the run's data result: the candidate groups, the total key count,
+  and the skipped list. No timings, no formatting — rendering is the shell's job.
