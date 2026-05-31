@@ -7,6 +7,16 @@ Verification convention: commands are run by the **user** (per CLAUDE.md — the
 agent does not run `cargo build`/`commit`). The "Verify" line is the
 done-criterion to run manually.
 
+Standing quality gate (run after each phase, alongside the per-task Verify):
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+`build` keeps warnings non-fatal (stub phases compile); the gate above is where
+warnings are denied.
+
 ---
 
 ## Phase 0 — Skeleton

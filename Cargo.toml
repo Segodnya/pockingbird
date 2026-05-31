@@ -26,3 +26,12 @@ toml = "0.8"
 
 clap = { version = "4", features = ["derive"], optional = true }
 colored = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unused = "warn"
+
+[lints.clippy]
+all = "warn"
