@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn combinations_are_correct() {
-        assert_eq!(combinations(3, 0), vec![vec![]]);
+        assert_eq!(combinations(3, 0), vec![Vec::<usize>::new()]);
         assert_eq!(combinations(3, 2), vec![vec![0, 1], vec![0, 2], vec![1, 2]]);
         assert_eq!(combinations(2, 3).len(), 0);
     }
