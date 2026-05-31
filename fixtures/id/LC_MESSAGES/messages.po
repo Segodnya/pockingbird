@@ -1,0 +1,43 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: pockingbird-fixtures 1.0\n"
+"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"PO-Revision-Date: 2024-01-01 00:00+0000\n"
+"Last-Translator: fixture <f@example.com>\n"
+"Language-Team: id <id@example.com>\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "save_btn"
+msgstr "Simpan"
+
+msgid "save_menu"
+msgstr "Simpan"
+
+# (b) M-1: del_menu diverges from del_btn here only
+msgid "del_btn"
+msgstr "Hapus"
+
+msgid "del_menu"
+msgstr "Buang"
+
+msgid "ok_msg"
+msgstr "Selesai."
+
+msgid "ok_alt"
+msgstr "Selesai"
+
+msgid "greet_a"
+msgstr "Selamat datang"
+
+# (d) empty msgstr: greet_b untranslated here -> Empty cell
+msgid "greet_b"
+msgstr ""
+
+msgid "n_files"
+msgid_plural "n_files_plural"
+msgstr[0] "%d berkas"
+msgstr[1] "%d berkas"

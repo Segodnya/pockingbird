@@ -1,0 +1,41 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: pockingbird-fixtures 1.0\n"
+"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"PO-Revision-Date: 2024-01-01 00:00+0000\n"
+"Last-Translator: fixture <f@example.com>\n"
+"Language-Team: tr <tr@example.com>\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "save_btn"
+msgstr "Kaydet"
+
+msgid "save_menu"
+msgstr "Kaydet"
+
+msgid "del_btn"
+msgstr "Sil"
+
+msgid "del_menu"
+msgstr "Sil"
+
+msgid "ok_msg"
+msgstr "Tamam."
+
+msgid "ok_alt"
+msgstr "Tamam"
+
+msgid "greet_a"
+msgstr "Hoş geldiniz"
+
+msgid "greet_b"
+msgstr "Hoş geldini"
+
+msgid "n_files"
+msgid_plural "n_files_plural"
+msgstr[0] "%d dosya"
+msgstr[1] "%d dosya"
