@@ -12,10 +12,10 @@ at which match tier (exact / normalized / fuzzy ≤2). Report only — never edi
 
 ## Reused approach
 
-The structure mirrors the sibling crate `dead-poets`: `polib` for parsing,
+The structure: `polib` for parsing,
 `ignore`/`globset` for file discovery, `rayon` for parallelism, `clap` for the
 CLI (under a `cli` feature), `colored` + `serde_json` for output, and temp-dir
-fixtures for integration tests. Unlike `dead-poets`, there is **no source
+fixtures for integration tests. There is **no source
 scanning** — no tree-sitter — because we only read `.po` files.
 
 ## Dependencies
@@ -35,7 +35,7 @@ scanning** — no tree-sitter — because we only read `.po` files.
 src/
   lib.rs        // pipeline: walk -> po -> index -> group -> report
   config.rs     // TOML schema (Config/Match/Locales/Output) + defaults
-  walk.rs       // discover .po files (adapted from dead-poets walk)
+  walk.rs       // discover .po files (adapted walk)
   locale.rs     // locale id from path (.../<locale>/LC_MESSAGES/*.po); path fallback
   po.rs         // parse a .po via polib -> Catalog; domain from filename stem
   normalize.rs  // canonicalize a string per tier (trim/case/whitespace/punct)
@@ -131,8 +131,7 @@ that bucketing consumes, so `group.rs` stays genuinely tier-agnostic.
 
 Complexity: bucketing is `O(n · C(M,T))` hashes (17k × `C(7, 1..2)` is cheap);
 fuzzy is BK-tree queries per locale (`≈ n·log n` + neighbors), not a global
-`O(n²)`. Parallelize with rayon; results are deterministic (sorted by key), as in
-`dead-poets`.
+`O(n²)`. Parallelize with rayon; results are deterministic (sorted by key).
 
 Partial matching is meant for "almost all" locales, so `T = M − K` is small by
 design. At startup we validate `Σ C(M, 0..T)` against a cap (a few hundred
@@ -204,7 +203,7 @@ Synthetic `.po` files (6 locales `en/ru/es/pt/tr/id`) crafted to exercise:
 - (d) empty `msgstr` under both `own` and `skip` policies;
 - (e) plural forms.
 
-- **Integration** (mirrors `dead-poets/tests/integration.rs`): temp-dir →
+- **Integration**: temp-dir →
   write fixtures + config → run the binary with `--format json` → assert group
   membership and tiers.
 - **Unit** per module: `normalize` (tiers), `fuzzy` (BK-tree/union-find clusters),
