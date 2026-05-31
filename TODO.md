@@ -77,8 +77,11 @@ Goal: have `KeyId × locale → Cell` and exact/normalized canonicalization.
   _Verify:_ unit test: `"  Ok  " → "Ok"`.
 - [ ] **2.2 normalize.rs — normalized.** case-fold + collapse whitespace +
   strip trailing punct, configurable via `[match.normalize]` flags.
-  Fix the set of stripped punctuation (Open detail).
-  _Verify:_ unit test: `"OK."`/`"ok"`/`"O K" → "ok"`; `exact ⊂ normalized`.
+  Fix the set of stripped punctuation (Open detail: **all Unicode Punctuation,
+  category P**). Whitespace is **collapsed to a single space** (decision), so
+  `"O K" → "o k"`, not `"ok"`.
+  _Verify:_ unit test: `"OK."`/`"OK "`/`"ok" → "ok"`; `"O  K" → "o k"`;
+  `exact ⊂ normalized`.
 - [ ] **2.3 index.rs — KeyId.** Type `KeyId{domain,msgctxt,msgid,msgid_plural}`,
   hashable/ordered.
   _Verify:_ unit test: `messages.po:X` ≠ `django.po:X`.

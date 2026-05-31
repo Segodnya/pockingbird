@@ -196,10 +196,7 @@ msgstr[1] "%d файла"
         let catalog = parse_fixture();
         let plural = find(&catalog, "%d file").expect("plural present");
         assert_eq!(plural.msgid_plural, Some("%d files".to_string()));
-        assert_eq!(
-            plural.value,
-            format!("%d файл{PLURAL_SEPARATOR}%d файла")
-        );
+        assert_eq!(plural.value, format!("%d файл{PLURAL_SEPARATOR}%d файла"));
     }
 
     #[test]
