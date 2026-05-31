@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::config::{self, Config};
-use crate::group::group;
 use crate::index::{build_matrix, CatalogInput};
-use crate::{locale, po, report, walk};
+use crate::{group, locale, po, report, walk};
 
 #[derive(Debug, Parser)]
 #[command(name = "pockingbird", version, about, long_about = None)]
@@ -55,6 +54,11 @@ pub fn run(cli: Cli) -> i32 {
 }
 
 fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
+    use std::io::Write;
+    use std::time::Instant;
+
+    let started = Instant::now();
+
     let mut config = match load_config(config_path.as_deref()) {
         Ok(config) => config,
         Err(message) => {
@@ -65,6 +69,7 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
     // The positional path overrides the configured roots.
     config.scan.roots = vec![path.clone()];
 
+    eprintln!("pockingbird: scanning {} …", path.display());
     let files = match walk::discover_po_files(&config.scan) {
         Ok(files) => files,
         Err(error) => {
@@ -76,9 +81,13 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
         eprintln!("no .po files found under {}", path.display());
         return;
     }
+    eprintln!("pockingbird: found {} .po files", files.len());
 
     let mut inputs = Vec::new();
-    for file in &files {
+    let mut skipped = Vec::new();
+    let total = files.len();
+    for (index, file) in files.iter().enumerate() {
+        eprint!("\rpockingbird: parsing {}/{total}", index + 1);
         match po::parse_po(file) {
             Ok(catalog) => inputs.push(CatalogInput {
                 locale: locale::locale_id(file),
@@ -86,7 +95,14 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
             }),
             // Report-only: a malformed catalog is skipped with a warning, never
             // fatal (architecture rule: the client decides what to do).
-            Err(error) => eprintln!("skipping {}: {error}", file.display()),
+            Err(error) => skipped.push(format!("  {}: {error}", file.display())),
+        }
+    }
+    eprintln!(); // close the progress line
+    if !skipped.is_empty() {
+        eprintln!("pockingbird: skipped {} file(s):", skipped.len());
+        for line in &skipped {
+            eprintln!("{line}");
         }
     }
     if inputs.is_empty() {
@@ -96,6 +112,10 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
 
     let mut matrix = build_matrix(&inputs, &config.locales.exclude);
     let total_keys = matrix.rows.len();
+    eprintln!(
+        "pockingbird: matrix — {} locales × {total_keys} keys",
+        matrix.locales.len()
+    );
 
     if let Err(error) = config.validate(matrix.locales.len()) {
         eprintln!("config error: {error}");
@@ -103,14 +123,32 @@ fn find(path: PathBuf, config_path: Option<PathBuf>, format: Option<Format>) {
     }
 
     matrix.retain_eligible(config.match_.min_locales_agree);
-    let groups = group(&matrix, &config.match_);
+
+    let mut groups = Vec::new();
+    for &tier in &config.match_.tiers {
+        let tier_started = Instant::now();
+        eprint!("pockingbird: grouping {tier:?} …");
+        let tier_groups = group::group_tier(&matrix, tier, &config.match_);
+        eprintln!(
+            " {} groups ({:.1?})",
+            tier_groups.len(),
+            tier_started.elapsed()
+        );
+        groups.extend(tier_groups);
+    }
 
     let rendered = if wants_json(format, &config) {
         report::to_json(&groups, total_keys)
     } else {
         report::to_text(&groups, total_keys)
     };
-    println!("{rendered}");
+    eprintln!(
+        "pockingbird: {} groups total in {:.1?}",
+        groups.len(),
+        started.elapsed()
+    );
+    // Ignore a broken pipe (e.g. piping into `head`) instead of panicking.
+    let _ = writeln!(std::io::stdout(), "{rendered}");
 }
 
 fn load_config(path: Option<&Path>) -> Result<Config, String> {

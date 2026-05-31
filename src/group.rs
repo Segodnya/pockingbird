@@ -58,21 +58,27 @@ pub struct CandidateGroup {
 pub fn group(matrix: &Matrix, config: &Match) -> Vec<CandidateGroup> {
     let mut all = Vec::new();
     for &tier in &config.tiers {
-        let canon = canonical_matrix(
-            matrix,
-            tier,
-            &config.normalize,
-            config.fuzzy_max_distance,
-            config.fuzzy_min_length,
-        );
-        all.extend(bucket(
-            &canon,
-            tier,
-            config.empty_policy,
-            config.min_locales_agree,
-        ));
+        all.extend(group_tier(matrix, tier, config));
     }
     all
+}
+
+/// Group a single tier (canonicalize + bucket). Exposed so callers can report
+/// per-tier progress on large catalogs.
+pub fn group_tier(matrix: &Matrix, tier: Tier, config: &Match) -> Vec<CandidateGroup> {
+    let canon = canonical_matrix(
+        matrix,
+        tier,
+        &config.normalize,
+        config.fuzzy_max_distance,
+        config.fuzzy_min_length,
+    );
+    bucket(
+        &canon,
+        tier,
+        config.empty_policy,
+        config.min_locales_agree,
+    )
 }
 
 // ---------------------------------------------------------------------------

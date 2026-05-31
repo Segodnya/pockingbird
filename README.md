@@ -57,7 +57,8 @@ pockingbird find . --config pockingbird.toml
 - `text` (default) — colored sections per tier (exact → normalized → fuzzy),
   each grouped by match level (`M/M`, `M−1/M`, …). Every group lists its keys,
   the shared translations, and the locales where they diverge. A summary at the
-  bottom reports the number of groups, keys, and potentially removable keys.
+  bottom reports the number of groups, keys, and candidate keys (never
+  "removable" — the call is yours).
 - `json` — the same group structure as machine-readable data.
 
 Exit code is always `0` — `pockingbird` reports, it does not gate.
@@ -76,6 +77,7 @@ exclude = []              # e.g. ["ch_CH"] to drop an incomplete locale
 [match]
 tiers = ["exact", "normalized", "fuzzy"]  # which tiers to compute and show
 fuzzy_max_distance = 2
+fuzzy_min_length = 5      # strings shorter than this skip the fuzzy tier
 empty_policy = "own"      # "own": empty is its own value | "skip": ignore that locale
 min_locales_agree = 5     # report tiers from M/M down to this floor
 
@@ -90,4 +92,13 @@ format = "text"           # "text" | "json"
 
 ## Status
 
-Design stage. See [PLAN.md](./PLAN.md) for the staged implementation plan.
+Implemented and tested. The full pipeline (`walk → po → index → group →
+report`) is in place: `.po` discovery, parsing, the `key × locale` matrix, all
+three match tiers (exact / normalized / fuzzy), partial-match levels via
+leave-one-out down to the configured floor, the `own`/`skip` empty policy, and
+`text` / `json` reports. Covered by per-module unit tests plus an end-to-end test
+([`tests/integration.rs`](./tests/integration.rs)); example catalogs live in
+[`fixtures/`](./fixtures).
+
+See [PLAN.md](./PLAN.md) for the design and [TODO.md](./TODO.md) for the task
+breakdown.

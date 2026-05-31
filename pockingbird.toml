@@ -9,18 +9,18 @@ roots = ["."]
 
 [locales]
 # Locales to drop from the matrix entirely (by locale id).
-exclude = []
+exclude = ["ch_CH"]
 
 [match]
 # Match tiers, run independently: exact (trim), normalized, fuzzy (edit distance).
-tiers = ["exact", "normalized", "fuzzy"]
+tiers = ["exact"]
 # Fuzzy clustering: Levenshtein radius and the min length to be eligible.
 fuzzy_max_distance = 2
 fuzzy_min_length = 5
 # Empty cells: "own" treats Empty as a token; "skip" drops it from the signature.
 empty_policy = "own"
 # A key participates only with >= this many non-empty locales (the floor K).
-min_locales_agree = 5
+min_locales_agree = 6
 
 [match.normalize]
 case_fold = true
