@@ -53,18 +53,9 @@ pub struct CandidateGroup {
     pub cross_domain: bool,
 }
 
-/// Run grouping over each configured tier, in order. Tiers are independent: a
-/// duplicate that holds under several tiers is reported once per tier.
-pub fn group(matrix: &Matrix, config: &Match) -> Vec<CandidateGroup> {
-    let mut all = Vec::new();
-    for &tier in &config.tiers {
-        all.extend(group_tier(matrix, tier, config));
-    }
-    all
-}
-
-/// Group a single tier (canonicalize + bucket). Exposed so callers can report
-/// per-tier progress on large catalogs.
+/// Group a single tier (canonicalize + bucket). The pipeline calls this per tier
+/// so it can emit per-tier progress; running every configured tier is just a
+/// loop over it (see the test helper).
 pub fn group_tier(matrix: &Matrix, tier: Tier, config: &Match) -> Vec<CandidateGroup> {
     let canon = canonical_matrix(
         matrix,
@@ -469,6 +460,15 @@ mod tests {
             min_locales_agree: min_agree,
             ..Match::default()
         }
+    }
+
+    /// Run grouping over every configured tier — what the pipeline does inline.
+    fn group(matrix: &Matrix, config: &Match) -> Vec<CandidateGroup> {
+        let mut all = Vec::new();
+        for &tier in &config.tiers {
+            all.extend(group_tier(matrix, tier, config));
+        }
+        all
     }
 
     // --- 4.1 the same bucketing runs over each tier ---

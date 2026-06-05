@@ -1,6 +1,6 @@
 //! The pipeline run: the deep core behind the CLI shell. Given `.po` paths, a
 //! parse adapter, config, and a progress sink, it parses, builds the Matrix,
-//! validates, gates eligibility, groups every tier, and returns a [`Report`].
+//! reconciles the floor, gates eligibility, groups every tier, and returns a [`Report`].
 //!
 //! This lives outside the `cli` feature so it is the test surface — the whole
 //! pipeline can be exercised without a process, the filesystem, or `colored`.
@@ -44,7 +44,7 @@ pub struct Skip {
 pub enum PipelineError {
     /// Every path failed to parse — nothing to group.
     NoCatalogs,
-    /// `min_locales_agree` is invalid for the locale count (see [`Config::validate`]).
+    /// `min_locales_agree` is invalid for the locale count (see [`Config::reconcile_floor`]).
     Config(ConfigError),
 }
 
@@ -62,11 +62,30 @@ impl std::error::Error for PipelineError {}
 /// A progress event emitted during a run. The vocabulary is here; the rendering
 /// is the sink's.
 pub enum PipelineEvent<'a> {
-    Parsing { done: usize, total: usize },
-    Skipped { path: &'a Path, error: &'a PoError },
-    Matrix { locales: usize, keys: usize },
+    Parsing {
+        done: usize,
+        total: usize,
+    },
+    Skipped {
+        path: &'a Path,
+        error: &'a PoError,
+    },
+    Matrix {
+        locales: usize,
+        keys: usize,
+    },
+    /// `min_locales_agree` exceeded the active locale count and was lowered to
+    /// it — otherwise every key would be filtered out and the report silently
+    /// empty.
+    FloorClamped {
+        configured: usize,
+        effective: usize,
+    },
     TierStarted(Tier),
-    TierDone { tier: Tier, groups: usize },
+    TierDone {
+        tier: Tier,
+        groups: usize,
+    },
 }
 
 /// The one-method progress seam. Implement it to render, time, or record.
@@ -129,15 +148,29 @@ where
         keys: total_keys,
     });
 
-    config
-        .validate(matrix.locales.len())
+    // Reconcile the floor against the active locale count: too low is a hard
+    // error, too high is clamped down to M (emitting a warning) so the report is
+    // never silently empty.
+    let decision = config
+        .reconcile_floor(matrix.locales.len())
         .map_err(PipelineError::Config)?;
-    matrix.retain_eligible(config.match_.min_locales_agree);
+    if decision.clamped {
+        sink.emit(PipelineEvent::FloorClamped {
+            configured: config.match_.min_locales_agree,
+            effective: decision.effective,
+        });
+    }
+    matrix.retain_eligible(decision.effective);
+
+    // The effective match settings: the configured knobs with the floor pinned to
+    // the reconciled value (group_tier reads it for leave-one-out depth).
+    let mut match_ = config.match_.clone();
+    match_.min_locales_agree = decision.effective;
 
     let mut groups = Vec::new();
-    for &tier in &config.match_.tiers {
+    for &tier in &match_.tiers {
         sink.emit(PipelineEvent::TierStarted(tier));
-        let tier_groups = group::group_tier(&matrix, tier, &config.match_);
+        let tier_groups = group::group_tier(&matrix, tier, &match_);
         sink.emit(PipelineEvent::TierDone {
             tier,
             groups: tier_groups.len(),
@@ -300,5 +333,53 @@ mod tests {
         assert_eq!(recorder.parsing, 2, "one Parsing event per path");
         assert_eq!(recorder.matrix, 1);
         assert_eq!(recorder.tiers_done, cfg.match_.tiers.len());
+    }
+
+    /// Captures only the floor-clamp event.
+    #[derive(Default)]
+    struct ClampRecorder {
+        clamped: Option<(usize, usize)>,
+    }
+
+    impl ProgressSink for ClampRecorder {
+        fn emit(&mut self, event: PipelineEvent<'_>) {
+            if let PipelineEvent::FloorClamped {
+                configured,
+                effective,
+            } = event
+            {
+                self.clamped = Some((configured, effective));
+            }
+        }
+    }
+
+    #[test]
+    fn floor_above_locale_count_is_clamped_not_silently_empty() {
+        // 2 locales but floor 5: without clamping `retain_eligible` drops every
+        // key and the report is silently empty. The clamp lowers it to M = 2.
+        let en = po_path("en");
+        let ru = po_path("ru");
+        let catalogs = HashMap::from([
+            (
+                en.clone(),
+                catalog("messages", vec![entry("a", "Save"), entry("b", "Save")]),
+            ),
+            (
+                ru.clone(),
+                catalog(
+                    "messages",
+                    vec![entry("a", "Сохранить"), entry("b", "Сохранить")],
+                ),
+            ),
+        ]);
+
+        let mut recorder = ClampRecorder::default();
+        let report = run(&[en, ru], parser(catalogs), &config(5), &mut recorder).expect("runs");
+
+        assert_eq!(recorder.clamped, Some((5, 2)), "floor 5 → 2 locales");
+        assert!(
+            report.groups.iter().any(|g| g.agree_locales == 2),
+            "clamped run still surfaces the full-agreement duplicate"
+        );
     }
 }

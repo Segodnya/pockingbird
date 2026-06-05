@@ -55,13 +55,13 @@ the seams the design is built around.
 - **Cross-tier dedup (dropped)** — an exact duplicate may reappear in the
   normalized and fuzzy sections; tiers are self-contained.
 - **Cross-domain candidate** — a group whose keys span more than one domain,
-  flagged with a *"unify into a shared domain"* hint.
+  flagged with a _"unify into a shared domain"_ hint.
 
 ## Pipeline
 
 - **Pipeline run** — the deep core (`pipeline.rs`, no `cli` feature): given `.po`
   paths, a parse adapter, config, and a progress sink, it parses, builds the
-  Matrix, validates, gates eligibility, groups every tier, and returns a
+  Matrix, reconciles the floor, gates eligibility, groups every tier, and returns a
   **Report**. This is the test surface — the seam the CLI shell wraps.
 - **Parse adapter** — the injected `Fn(&Path) -> Result<ParsedCatalog, PoError>`.
   Real adapter reads the file (`po::parse_po`); the in-memory adapter feeds tests
@@ -73,3 +73,26 @@ the seams the design is built around.
   events for assertions. Keeps timing/IO out of the core.
 - **Report** — the run's data result: the candidate groups, the total key count,
   and the skipped list. No timings, no formatting — rendering is the shell's job.
+- **Facade (`scan`)** — the one-call library door: `scan(root, &Config) -> Report`
+  discovers, parses, and runs the pipeline. The CLI is a thin shell over it (it
+  does not re-wire walk/pipeline itself). `scan_with` takes a progress sink.
+
+## Configuration
+
+- **RawConfig** — the deserialization target (`scan`, `locales`, `match`, `output`),
+  where `match` is a **MatchOverride**, not a resolved `Match`. `deny_unknown_fields`
+  lives here. The only thing TOML parses into.
+- **MatchOverride** — a draft `[match]`: every knob `Option`, plus a `preset`. A
+  missing knob means "fall back"; a present knob is an explicit override. The CLI
+  builds one from flags (`--tier []` → `None`); the file parses into one.
+- **Resolve seam** — `resolve(file: MatchOverride, cli: MatchOverride) -> Match`,
+  the single place precedence is applied: `preset = cli.preset ?? file.preset ??
+Balanced`, then overlay `base ← file ← cli` field by field. \*\*CLI > file > preset
+  > default\**, per field. `Config::from_toml` resolves with an empty CLI override;
+  > the CLI passes its own. `Config` itself is the *resolved\* product (not
+  > `Deserialize`); its `match` is always a fully-populated `Match`.
+- **FloorDecision** — the result of `reconcile_floor(M)`: the **effective** floor
+  and whether it was **clamped**. One call folds both floor checks — too low for
+  `M` is a hard `ConfigError` (sub-signature blow-up); too high is clamped down to
+  `M` (a warning, never a silently-empty report). The two never collide: a floor
+  above `M` has leave-one-out depth `0`, so it cannot blow up.

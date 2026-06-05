@@ -6,7 +6,7 @@
 A CLI that finds **duplicate translation keys** in gettext `.po` catalogs.
 
 Over time a catalog grows keys whose translations are identical across every
-locale — real duplicates that can collapse into one key — plus *near*-duplicates
+locale — real duplicates that can collapse into one key — plus _near_-duplicates
 that differ only by trailing punctuation, a typo, or one disagreeing locale.
 `pockingbird` surfaces all of them in a single report.
 
@@ -45,41 +45,52 @@ cargo install --path .
 ```sh
 pockingbird find .                              # current dir, text report
 pockingbird find ./locales --format json        # JSON for pipelines
+pockingbird find . --preset strict              # exact-match only, no config file
+pockingbird find . --min-agree 3 --tier exact   # override knobs from the CLI
 pockingbird find . --config pockingbird.toml    # with a config file
+pockingbird init                                # write a starter pockingbird.toml
 ```
 
 - `text` (default) — colored sections per tier, each grouped by level. Every
   group lists its keys, shared translations, and diverging locales; cross-domain
-  groups get a *"unify into a shared domain"* hint.
+  groups get a _"unify into a shared domain"_ hint.
 - `json` — the same structure as machine-readable data.
 
-Exit code is always `0` — it reports, it does not gate.
+Exit code is always `0` — it reports, it does not gate. If `min_locales_agree`
+exceeds the number of locales found, it is lowered to that count (with a warning)
+so the report is never silently empty.
 
-## Configuration (`pockingbird.toml`)
+## Configuration
+
+Run `pockingbird init` to drop a commented [`pockingbird.toml`](./pockingbird.toml)
+that mirrors the built-in defaults. The fastest way to configure matching is a
+**preset**; tune individual knobs on top only if you need to:
 
 ```toml
-[scan]
-po_patterns = ["**/*.po"]
-ignore_dirs = ["vendor", "node_modules", ".git"]
-roots = ["."]
-
-[locales]
-exclude = []             # e.g. ["ch_CH"] to drop an incomplete locale
-
 [match]
-tiers = ["exact", "normalized", "fuzzy"]  # which tiers to compute
-fuzzy_max_distance = 2
-fuzzy_min_length = 5      # shorter strings skip the fuzzy tier
-empty_policy = "own"      # "own": empty is a value | "skip": ignore that cell
-min_locales_agree = 5     # report from M/M down to this floor
+preset = "balanced"       # strict | balanced | loose
+# any explicit field below overrides the preset baseline:
+# min_locales_agree = 5
+```
 
-[match.normalize]
-case_fold = true
-collapse_whitespace = true
-strip_trailing_punct = true
+- `strict` — exact tier only, no normalization (byte-identical translations).
+- `balanced` (default) — exact + normalized + fuzzy≤2, normalization on.
+- `loose` — balanced with a wider fuzzy radius (≤3) and a lower length floor.
 
-[output]
-format = "text"           # "text" | "json"
+CLI flags (`--preset`, `--min-agree`, `--tier`, `--exclude`, `--format`) override
+the config file, which overrides the preset, which overrides the built-in
+defaults. Precedence is resolved **per field**: a CLI `--preset` re-bases the
+baseline, but any knob you set explicitly in the file still wins over it. See
+[`pockingbird.toml`](./pockingbird.toml) for every knob.
+
+## Library
+
+```rust
+use std::path::Path;
+use pockingbird::{scan, Config};
+
+let report = scan(Path::new("./locales"), &Config::default())?;
+let json = pockingbird::report::to_json(&report.groups, report.total_keys);
 ```
 
 Domain terms are defined in [CONTEXT.md](./CONTEXT.md). Example catalogs live in

@@ -1,31 +1,27 @@
-# pockingbird — example configuration (mirrors the built-in defaults).
+# pockingbird — starter config.
 # Report-only: pockingbird never edits .po files and always exits 0.
 
 [scan]
-# Glob patterns for catalogs, and directories pruned during the walk.
 po_patterns = ["**/*.po"]
 ignore_dirs = ["vendor", "node_modules", ".git"]
 roots = ["."]
 
 [locales]
-# Locales to drop from the matrix entirely (by locale id).
-exclude = ["ch_CH"]
+exclude = []              # e.g. ["ch_CH"] to drop an incomplete locale
 
 [match]
-# Match tiers, run independently: exact (trim), normalized, fuzzy (edit distance).
-tiers = ["exact"]
-# Fuzzy clustering: Levenshtein radius and the min length to be eligible.
-fuzzy_max_distance = 2
-fuzzy_min_length = 5
-# Empty cells: "own" treats Empty as a token; "skip" drops it from the signature.
-empty_policy = "own"
-# A key participates only with >= this many non-empty locales (the floor K).
-min_locales_agree = 6
+preset = "balanced"       # strict | balanced | loose — baseline for the knobs below
+min_locales_agree = 5     # report from M/M down to this floor (auto-lowered if > locale count)
+# Override individual knobs on top of the preset (uncomment to tune):
+# tiers = ["exact", "normalized", "fuzzy"]
+# fuzzy_max_distance = 2
+# fuzzy_min_length = 5
+# empty_policy = "own"    # "own": empty is a value | "skip": ignore that cell
 
-[match.normalize]
-case_fold = true
-collapse_whitespace = true
-strip_trailing_punct = true
+# [match.normalize]       # merged onto the preset; omitted toggles keep its value
+# case_fold = true
+# collapse_whitespace = true
+# strip_trailing_punct = true
 
 [output]
-format = "text"
+format = "text"           # "text" | "json"
